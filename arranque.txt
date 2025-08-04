@@ -1,0 +1,3 @@
+redis control:  redis-cli p
+django: python manage.py runserver
+celery: celery -A core worker -l info -P solo
