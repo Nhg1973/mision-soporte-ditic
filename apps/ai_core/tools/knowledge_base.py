@@ -1,55 +1,71 @@
-# --- Base de Conocimiento Simulada ---
-# En un sistema real, esto sería una base de datos vectorial (FAISS, ChromaDB).
-# Para nuestro prototipo, un diccionario es rápido y efectivo.
-# La clave es una tupla de palabras clave, y el valor es la solución.
+import os
+import asyncio
+from django.conf import settings
 
-KNOWLEDGE_BASE = {
-    ('clave', 'contraseña', 'olvidé', 'perdí', 'acceso'): {
-        'solucion': (
-            "¡Entendido! Parece que tienes un problema con tu contraseña. "
-            "Puedes restablecerla tú mismo siguiendo estos pasos:\n"
-            "1. Ve a la página de intranet.\n"
-            "2. Haz clic en '¿Olvidaste tu contraseña?'.\n"
-            "3. Sigue las instrucciones que recibirás en tu correo.\n\n"
-            "Si eso no funciona, avísame y crearé un ticket para que un técnico te ayude."
-        )
-    },
-    ('impresora', 'imprimir', 'no funciona', 'papel', 'tóner'): {
-        'solucion': (
-            "Ok, un problema con la impresora. Antes de escalar esto, probemos lo básico:\n"
-            "1. Asegúrate de que la impresora esté encendida y conectada a la red.\n"
-            "2. Verifica que tenga papel y tóner.\n"
-            "3. Intenta apagarla y volver a encenderla después de 30 segundos.\n\n"
-            "Si después de estos pasos sigues sin poder imprimir, dímelo y un técnico se pondrá en contacto."
-        )
-    },
-    ('vpn', 'conectar', 'remoto', 'desde casa'): {
-        'solucion': (
-            "Para problemas de conexión a la VPN, la solución más común es reinstalar el perfil de conexión.\n"
-            "Puedes encontrar la guía paso a paso en este enlace: https://www.reddit.com/r/fortinet/comments/13iw66q/internal_vpn/\n\n"
-            "¡Normalmente eso soluciona el 90% de los casos!"
-        )
-    },
-}
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.vectorstores import Chroma
 
-def search_knowledge_base(user_query: str) -> str | None:
+# --- Función Asíncrona Principal ---
+# Esta función contiene la lógica de búsqueda que necesita un entorno asíncrono.
+async def _asearch_vector_store(user_query: str) -> list:
     """
-    Busca en la base de conocimiento si alguna palabra clave coincide con la consulta del usuario.
-
-    Args:
-        user_query: El texto enviado por el usuario (en minúsculas).
-
-    Returns:
-        La solución en formato de texto si se encuentra una coincidencia, o None si no se encuentra.
+    Lógica asíncrona principal para realizar la búsqueda por similitud.
     """
-    query_words = set(user_query.lower().split())
-    
-    for keywords, data in KNOWLEDGE_BASE.items():
-        # Verificamos si alguna de las palabras clave está en la consulta del usuario
-        if any(keyword in query_words for keyword in keywords):
-            print(f"ORQUESTADOR: Coincidencia encontrada en la base de conocimiento con las palabras clave: {keywords}")
-            return data['solucion']
+    try:
+        gemini_api_key = os.getenv('GEMINI_API_KEY')
+        if not gemini_api_key:
+            print("BÚSQUEDA VECTORIAL: Error - La clave de API de Gemini no está configurada.")
+            return []
+
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=gemini_api_key)
+        
+        persist_directory = os.path.join(settings.BASE_DIR, 'chroma_db')
+        
+        if not os.path.exists(persist_directory):
+            print("BÚSQUEDA VECTORIAL: Error - El directorio de ChromaDB no existe.")
+            return []
+
+        vectorstore = Chroma(
+            persist_directory=persist_directory,
+            embedding_function=embeddings
+        )
+
+        # La búsqueda en sí es una operación que puede bloquear el hilo.
+        # La ejecutamos en un hilo separado para no interferir con el bucle de eventos.
+        relevant_docs = await asyncio.to_thread(vectorstore.similarity_search, user_query, k=3)
+        
+        if relevant_docs:
+            print(f"BÚSQUEDA VECTORIAL: Se encontraron {len(relevant_docs)} fragmentos relevantes.")
+        else:
+            print("BÚSQUEDA VECTORIAL: No se encontraron fragmentos relevantes.")
             
-    # Si el bucle termina sin encontrar coincidencias
-    print("ORQUESTADOR: No se encontraron soluciones en la base de conocimiento.")
-    return None
+        return relevant_docs
+
+    except Exception as e:
+        print(f"BÚSQUEDA VECTORIAL: Ocurrió un error al buscar en ChromaDB: {e}")
+        return []
+
+# --- Función Síncrona "Envoltorio" ---
+# Esta es la función que nuestro orquestador síncrono llamará.
+def search_knowledge_base_vector(user_query: str) -> list:
+    """
+    Envoltorio síncrono que crea un bucle de eventos para ejecutar de forma segura
+    la lógica de búsqueda asíncrona.
+    """
+    print(f"BÚSQUEDA VECTORIAL: Iniciando búsqueda para la consulta: '{user_query}'")
+    try:
+        # asyncio.run() crea un nuevo bucle de eventos, ejecuta nuestra función
+        # asíncrona hasta que termina, y luego cierra el bucle.
+        return asyncio.run(_asearch_vector_store(user_query))
+    except RuntimeError as e:
+        # Manejo de un caso borde donde un bucle ya podría estar corriendo.
+        if "cannot run loop while another loop is running" in str(e):
+            print("BÚSQUEDA VECTORIAL: Detectado bucle de eventos existente. Creando uno nuevo.")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(_asearch_vector_store(user_query))
+            loop.close()
+            return result
+        else:
+            # Si es otro tipo de RuntimeError, lo relanzamos.
+            raise e

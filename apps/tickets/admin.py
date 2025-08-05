@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
 from .models import Ticket, LogInteraccion, TechnicianProfile
+from .models import Ticket, LogInteraccion, TechnicianProfile, KnowledgeDocument
 
 # ==============================================================================
 # Vista Personalizada para los Logs de Interacción (Inline)
@@ -63,6 +64,22 @@ class UserAdmin(BaseUserAdmin):
 #    Primero lo quitamos del registro y luego lo volvemos a registrar con la nueva clase.
 admin.site.unregister(User)
 admin.site.register(User, UserAdmin)
+
+# ==============================================================================
+# Vista de Admin para la Base de Conocimiento
+# ==============================================================================
+@admin.register(KnowledgeDocument)
+class KnowledgeDocumentAdmin(admin.ModelAdmin):
+    list_display = ('nombre', 'categoria', 'estado_procesamiento', 'cargado_por', 'fecha_carga')
+    list_filter = ('estado_procesamiento', 'categoria', 'fecha_carga')
+    search_fields = ('nombre', 'archivo')
+    readonly_fields = ('estado_procesamiento', 'cargado_por', 'fecha_carga', 'ultimo_error')
+
+    def save_model(self, request, obj, form, change):
+        # Asigna automáticamente el usuario que está subiendo el archivo.
+        if not obj.pk: # Solo al crear el objeto
+            obj.cargado_por = request.user
+        super().save_model(request, obj, form, change)
 
 
 
