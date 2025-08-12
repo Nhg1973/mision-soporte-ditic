@@ -77,10 +77,28 @@ def process_document_task(document_id):
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = text_splitter.split_documents(documents)
         
+        print(f"CELERY: Enriqueciendo {len(chunks)} fragmentos con metadatos de tema...")
         for i, chunk in enumerate(chunks):
+            # Metadatos existentes
             chunk.metadata['document_id'] = str(doc.id)
             chunk.metadata['document_name'] = doc.nombre
             chunk.metadata['chunk_index'] = i
+            
+            # ¡NUEVOS METADATOS DE TEMA!
+            # Usamos la categoría guardada desde el formulario.
+            if doc.categoria:
+                # Si la categoría es "TemaPrincipal/SubTema", los separamos.
+                parts = doc.categoria.split('/')
+                chunk.metadata['tema'] = parts[0]
+                if len(parts) > 1:
+                    chunk.metadata['subtema'] = parts[1]
+                else:
+                    chunk.metadata['subtema'] = 'General' # Un subtema por defecto
+
+        # Imprimimos un ejemplo para verificar
+        if chunks:
+          print(f"CELERY: Ejemplo de metadatos del primer chunk: {chunks[0].metadata}")
+      
 
         print(f"CELERY: Documento #{doc.id} dividido en {len(chunks)} fragmentos.")
 

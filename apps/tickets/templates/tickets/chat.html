@@ -11,7 +11,7 @@
         body { background-color: #f4f7f6; }
         .main-container {
             display: grid;
-            grid-template-columns: 300px 1fr;
+            grid-template-columns: 300px 1fr 350px;
             gap: 1.5rem;
             height: 90vh;
             margin-top: 5vh;
@@ -78,7 +78,7 @@
                 {% endfor %}
 
                 <!-- Sección de Calificación -->
-                {% if ticket_activo and ticket_activo.estado in "RESUELTO_BOT,RESUELTO_TECNICO,CERRADO" %}
+                {% if ticket_activo and ticket_activo.estado == 'EN_PROCESO' %}
                     <div class="text-center mt-4 p-3 bg-light rounded">
                         {% if ticket_activo.calificacion %}
                             <p class="mb-1">¡Gracias por tu feedback!</p>
@@ -112,6 +112,58 @@
                 </form>
             </div>
         </div>
+
+        <!-- Ventana contexto  -->
+        <div class="sidebar"> <h4 class="mb-3">Contexto del Bot</h4>
+            {% if graph_state %}
+                <div class="card bg-light border-0">
+                    <div class="card-body">
+                        <p class="mb-2">
+                            <strong><i class="fas fa-tag me-2"></i>Tema Detectado:</strong>
+                            <span class="badge bg-primary">{{ graph_state.current_topic|default:"N/A" }}</span>
+                        </p>
+                        <p class="mb-0">
+                            <strong><i class="fas fa-check-double me-2"></i>Confianza:</strong>
+                            <span class="badge bg-secondary">{{ graph_state.topic_confidence|default:"N/A" }}</span>
+                        </p>
+                        {% if graph_state.topic_locked %}
+                            <p class="mt-2 mb-0 text-success small">
+                                <i class="fas fa-lock me-1"></i> Tema Fijado
+                            </p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="my-3">
+                    <label for="topic-selector" class="form-label small">Corregir Tema:</label>
+                    <select id="topic-selector" class="form-select form-select-sm" disabled>
+                        <option>Funcionalidad en desarrollo</option>
+                    </select>
+                </div>
+
+                <hr>
+
+                <h5 class="h6 mb-3">Fuentes Consultadas</h5>
+                {% if graph_state.relevant_docs %}
+                    <ul class="list-group list-group-flush small">
+                        {% for doc in graph_state.relevant_docs %}
+                            <li class="list-group-item px-0">
+                                <i class="fas fa-file-alt me-2 text-muted"></i>
+                                <strong>{{ doc.metadata.source|default:"Desconocido" }}</strong>
+                                <br>
+                                <span class="text-muted">Página: {{ doc.metadata.page|default:"N/A" }}</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-muted small">No se consultaron documentos en la última interacción.</p>
+                {% endif %}
+
+            {% else %}
+                <p class="text-muted">Inicia una conversación para ver el contexto del bot.</p>
+            {% endif %}
+        </div>
+
     </div>
 
     <script>

@@ -1,23 +1,22 @@
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from .models import Ticket, LogInteraccion
-from apps.ai_core.orchestrator import process_user_request
+from apps.ai_core.graph import app as langgraph_app
 
 @login_required
 def chat_view(request, ticket_id=None):
     """
-    Gestiona la lógica del chat web, ahora con un manejo de sesión robusto.
+    Gestiona la lógica del chat web. Ahora invoca el grafo de LangGraph
+    para procesar las solicitudes de los usuarios.
     """
-    # Si se pasa un ticket_id en la URL, se establece como la conversación activa.
     if ticket_id:
         ticket = get_object_or_404(Ticket, id=ticket_id, usuario=request.user)
         request.session['active_ticket_id'] = ticket.id
         return redirect('tickets:chat')
 
-    # Obtenemos todos los tickets del usuario para el historial.
     tickets_del_usuario = Ticket.objects.filter(usuario=request.user)
     
-    # Buscamos el ticket activo en la sesión.
     ticket_activo = None
     logs_conversacion = []
     active_ticket_id = request.session.get('active_ticket_id')
@@ -28,28 +27,46 @@ def chat_view(request, ticket_id=None):
         except Ticket.DoesNotExist:
             del request.session['active_ticket_id']
 
-    # Procesamos el envío de un nuevo mensaje.
+    graph_state = request.session.get('graph_state', {})
+
     if request.method == 'POST':
         mensaje_usuario = request.POST.get('mensaje', '').strip()
         if mensaje_usuario:
-            # --- LÓGICA CORREGIDA ---
-            # Si el ticket activo está resuelto o no hay ninguno, creamos uno nuevo.
-            if not ticket_activo or ticket_activo.estado in [Ticket.Estado.RESUELTO_TECNICO, Ticket.Estado.CERRADO]:#Ticket.Estado.RESUELTO_BOT,
+            # Lógica para crear un ticket nuevo si es necesario (ESTA PARTE ESTÁ BIEN)
+            if not ticket_activo or ticket_activo.estado in [Ticket.Estado.RESUELTO_BOT, Ticket.Estado.RESUELTO_TECNICO, Ticket.Estado.CERRADO]:
                 ticket_activo = Ticket.objects.create(
                     usuario=request.user,
-                    descripcion_inicial=mensaje_usuario
+                    descripcion_inicial=mensaje_usuario,
+                    estado=Ticket.Estado.EN_PROCESO # ¡Mejora! Nace 'En Proceso'.
                 )
                 request.session['active_ticket_id'] = ticket_activo.id
-            
-            # Guardamos el nuevo mensaje en el log del ticket activo.
+
+            # Guardamos el mensaje del usuario (ESTA PARTE ESTÁ BIEN)
             LogInteraccion.objects.create(
                 ticket=ticket_activo,
                 mensaje=mensaje_usuario,
                 emisor=LogInteraccion.Emisor.USUARIO
             )
-            
-            # Le pasamos el control al orquestador.
-            process_user_request(ticket_activo.id, mensaje_usuario)
+
+            # --- ¡INTEGRACIÓN CON LANGGRAPH! ---
+            initial_state = {
+                "ticket_id": ticket_activo.id,
+                "user_input": mensaje_usuario,
+                "current_topic": graph_state.get("current_topic"),
+                "topic_locked": graph_state.get("topic_locked", False),
+                "clarification_attempts": graph_state.get("clarification_attempts", 0),
+            }
+            final_state = langgraph_app.invoke(initial_state)
+
+            # Guardamos la respuesta final generada por el grafo (ESTA PARTE ESTÁ BIEN)
+            if final_state.get("final_response"):
+                LogInteraccion.objects.create(
+                    ticket=ticket_activo,
+                    mensaje=final_state["final_response"],
+                    emisor=LogInteraccion.Emisor.SISTEMA
+                )
+
+            # ¡YA NO HACEMOS NADA MÁS! EL TICKET SIGUE 'EN PROCESO'.
 
         return redirect('tickets:chat')
 
@@ -80,15 +97,15 @@ def rate_ticket_view(request, ticket_id, rating):
 
     # Solo permite calificar tickets que no estén ya cerrados.
     if ticket.estado != Ticket.Estado.CERRADO:
-        if 1 <= rating <= 5:
+        if 1 <= int(rating) <= 5:
             ticket.calificacion = rating
-            # ¡Paso clave! Marcamos el ticket como cerrado.
+            # ¡PASO CLAVE 1! Marcamos el ticket como cerrado.
             ticket.estado = Ticket.Estado.CERRADO 
             ticket.save()
 
-        # ¡Paso clave 2! Limpiamos la sesión para que el siguiente chat sea nuevo.
-        if request.session.get('active_ticket_id') == ticket.id:
+        # ¡PASO CLAVE 2! Limpiamos la sesión para que el siguiente chat sea nuevo,
+        # sin importar si la calificación fue válida o no.
+        if 'active_ticket_id' in request.session:
             del request.session['active_ticket_id']
 
     return redirect('tickets:chat')
-

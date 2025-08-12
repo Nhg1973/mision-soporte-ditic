@@ -17,7 +17,7 @@ def process_user_request(ticket_id, mensaje_actual):
         print(f"ORQUESTADOR: Error - No se encontró el ticket #{ticket_id}")
         return
 
-    # 1. Obtenemos el historial completo de la conversación (lógica de tu versión).
+    # 1. Obtenemos el historial completo de la conversación para darle memoria al bot.
     conversation_logs = ticket.logs.all().order_by('fecha_creacion')
     chat_history = "\n".join(
         [f"{log.get_emisor_display()}: {log.mensaje}" for log in conversation_logs]
@@ -27,7 +27,7 @@ def process_user_request(ticket_id, mensaje_actual):
     relevant_docs = search_knowledge_base_vector(mensaje_actual)
     context = "\n\n".join([doc.page_content for doc in relevant_docs]) if relevant_docs else "No se encontró información relevante en la base de conocimiento."
 
-    # 3. Creamos el prompt conversacional que incluye el historial (lógica de tu versión).
+    # 3. Creamos el prompt conversacional que incluye el historial.
     prompt = (
         "Eres un asistente experto de la mesa de ayuda de DITIC para la Cancillería Argentina. "
         "Tu tarea es continuar la siguiente conversación de manera útil y coherente.\n\n"
@@ -43,12 +43,7 @@ def process_user_request(ticket_id, mensaje_actual):
         "--- INICIO DEL HISTORIAL DE LA CONVERSACIÓN ---\n"
         "{chat_history}\n"
         "--- FIN DEL HISTORIAL ---\n\n"
-        "Tu tarea es generar la siguiente respuesta del 'Sistema'.\n"
-        "**IMPORTANTE:** Después de tu respuesta, añade una de las siguientes etiquetas para indicar tu acción:\n"
-        "- `[ACCION: PREGUNTAR]` si estás haciendo una pregunta para obtener más información.\n"
-        "- `[ACCION: RESOLVER]` si crees que has proporcionado una solución completa.\n"
-        "- `[ACCION: ESCALAR]` si determinas que el problema requiere un técnico humano.\n\n"
-        "Ejemplo de respuesta: 'Para configurar la VPN, necesitas descargar el cliente desde el portal de la intranet. [ACCION: RESOLVER]'"
+        "Tu tarea es generar la siguiente respuesta del 'Sistema':"
     ).format(context=context, chat_history=chat_history)
 
     try:
@@ -60,19 +55,6 @@ def process_user_request(ticket_id, mensaje_actual):
         response = llm.invoke(prompt)
         respuesta_ia = response.content if hasattr(response, "content") else str(response)
 
-        # Extraemos la acción y limpiamos la respuesta para el usuario
-        accion_detectada = "PREGUNTAR" # Valor por defecto
-        if "[ACCION: RESOLVER]" in respuesta_ia:
-            accion_detectada = "RESOLVER"
-            respuesta_limpia = respuesta_ia.replace("[ACCION: RESOLVER]", "").strip()
-        elif "[ACCION: ESCALAR]" in respuesta_ia:
-            accion_detectada = "ESCALAR"
-            respuesta_limpia = respuesta_ia.replace("[ACCION: ESCALAR]", "").strip()
-        else:
-            # Asumimos que es una pregunta si no se especifica otra cosa
-            respuesta_limpia = respuesta_ia.replace("[ACCION: PREGUNTAR]", "").strip()
-        
-
         LogInteraccion.objects.create(
             ticket=ticket,
             mensaje=respuesta_ia,
@@ -80,22 +62,13 @@ def process_user_request(ticket_id, mensaje_actual):
         )
         print(f"ORQUESTADOR: Respuesta generada para el ticket #{ticket.id}")
 
-        # Actuamos según la acción detectada
-        if accion_detectada == "ESCALAR":
-            escalate_to_technician(ticket, "La IA determinó que se necesita asistencia humana.")
-        
-        elif accion_detectada == "RESOLVER":
-            ticket.estado = Ticket.Estado.RESUELTO_BOT
-            ticket.save()
-            # Limpiamos la sesión para que el siguiente mensaje inicie un nuevo ticket
-            # (Esto es opcional, pero recomendable)
-            # request.session.pop('active_ticket_id', None) # Esta lógica debería ir en la vista
-            
-        elif accion_detectada == "PREGUNTAR":
-            # ¡No hacemos nada con el estado! El ticket sigue 'Abierto' o 'En Proceso',
-            # esperando la respuesta del usuario.
-            ticket.estado = Ticket.Estado.EN_PROCESO # Aseguramos que el estado sea el correcto
-            ticket.save()
+        # Lógica de decisión: si la IA pide más información o dice que no sabe, escalamos.
+        if "no puedo ayudarte" in respuesta_ia.lower() or "necesito más información" in respuesta_ia.lower() or "no contiene información" in respuesta_ia.lower():
+             escalate_to_technician(ticket, "La IA determinó que se necesita asistencia humana.")
+        else:
+             # Si parece una solución, lo marcamos como resuelto por el bot.
+             ticket.estado = Ticket.Estado.RESUELTO_BOT
+             ticket.save()
 
     except Exception as e:
         print(f"ORQUESTADOR: Error al llamar a Gemini: {e}")
@@ -115,9 +88,10 @@ def escalate_to_technician(ticket, reason):
     ticket.estado = Ticket.Estado.ESCALADO
     ticket.save()
     
+    # Este log es para el usuario y se añade a la conversación.
     mensaje_escalada = (
-        f"He creado el Ticket #{ticket.id} para tu consulta. "
-        f"Un técnico lo revisará a la brevedad."
+        f"He escalado tu consulta a un técnico con la siguiente nota: '{reason}'. "
+        f"Se ha creado el Ticket #{ticket.id} y un técnico lo revisará a la brevedad."
     )
     LogInteraccion.objects.create(
         ticket=ticket,
@@ -128,5 +102,6 @@ def escalate_to_technician(ticket, reason):
     # --- LOG DE DEPURACIÓN AÑADIDO ---
     print(f"ORQUESTADOR: [DEBUG] Preparando para enviar tarea a Celery para el ticket #{ticket.id}...")
     notify_technician_task.delay(ticket.id)
+    
     print(f"ORQUESTADOR: [DEBUG] Tarea para el ticket #{ticket.id} enviada a la cola de Celery.")
 

@@ -132,3 +132,33 @@ class KnowledgeDocument(models.Model):
         verbose_name = "Documento de Conocimiento"
         verbose_name_plural = "Documentos de Conocimiento"
         ordering = ['-fecha_carga']
+
+# ==============================================================================
+# ¡NUEVO MODELO! - Bandeja de Salida para Telegram
+# ==============================================================================
+class OutgoingTelegramMessage(models.Model):
+    """
+    Representa un mensaje que está en cola para ser enviado a través de Telegram.
+    El script del poller revisará esta tabla y enviará los mensajes pendientes.
+    """
+    # En lugar de relacionarlo con un Ticket, es más flexible guardando
+    # directamente el chat_id y el texto.
+    telegram_chat_id = models.CharField(
+        max_length=100,
+        verbose_name="ID de Chat de Telegram de Destino"
+    )
+    message_text = models.TextField(
+        verbose_name="Contenido del Mensaje"
+    )
+    fecha_creacion = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="Fecha de Creación"
+    )
+
+    def __str__(self):
+        return f"Mensaje para {self.telegram_chat_id} creado el {self.fecha_creacion}"
+
+    class Meta:
+        verbose_name = "Mensaje Saliente de Telegram"
+        verbose_name_plural = "Mensajes Salientes de Telegram"
+        ordering = ['fecha_creacion']
