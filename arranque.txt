@@ -1,4 +1,5 @@
 redis control:  docker start redis
+redis en local: redis-server
 django: python manage.py runserver
 celery: celery -A core worker -l info -P solo
 bot telegram:  python manage.py poll_telegram

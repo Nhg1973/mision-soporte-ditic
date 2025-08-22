@@ -32,23 +32,21 @@ def chat_view(request, ticket_id=None):
     if request.method == 'POST':
         mensaje_usuario = request.POST.get('mensaje', '').strip()
         if mensaje_usuario:
-            # Lógica para crear un ticket nuevo si es necesario (ESTA PARTE ESTÁ BIEN)
-            if not ticket_activo or ticket_activo.estado in [Ticket.Estado.RESUELTO_BOT, Ticket.Estado.RESUELTO_TECNICO, Ticket.Estado.CERRADO]:
+            if not ticket_activo or ticket_activo.estado in [Ticket.Estado.CERRADO]:
                 ticket_activo = Ticket.objects.create(
                     usuario=request.user,
                     descripcion_inicial=mensaje_usuario,
-                    estado=Ticket.Estado.EN_PROCESO # ¡Mejora! Nace 'En Proceso'.
+                    estado=Ticket.Estado.EN_PROCESO
                 )
                 request.session['active_ticket_id'] = ticket_activo.id
+                graph_state = {}
 
-            # Guardamos el mensaje del usuario (ESTA PARTE ESTÁ BIEN)
             LogInteraccion.objects.create(
                 ticket=ticket_activo,
                 mensaje=mensaje_usuario,
                 emisor=LogInteraccion.Emisor.USUARIO
             )
 
-            # --- ¡INTEGRACIÓN CON LANGGRAPH! ---
             initial_state = {
                 "ticket_id": ticket_activo.id,
                 "user_input": mensaje_usuario,
@@ -58,7 +56,6 @@ def chat_view(request, ticket_id=None):
             }
             final_state = langgraph_app.invoke(initial_state)
 
-            # Guardamos la respuesta final generada por el grafo (ESTA PARTE ESTÁ BIEN)
             if final_state.get("final_response"):
                 LogInteraccion.objects.create(
                     ticket=ticket_activo,
@@ -66,14 +63,46 @@ def chat_view(request, ticket_id=None):
                     emisor=LogInteraccion.Emisor.SISTEMA
                 )
 
-            # ¡YA NO HACEMOS NADA MÁS! EL TICKET SIGUE 'EN PROCESO'.
+            # --- ¡BLOQUE DE CORRECCIÓN! ---
+            # Antes de guardar en la sesión, convertimos los objetos no serializables.
+            
+            # 1. Hacemos una copia del estado para no modificar el original.
+            serializable_state = final_state.copy()
+
+            # 2. Convertimos el historial de chat a una lista de diccionarios simples.
+            if serializable_state.get("chat_history"):
+                serializable_chat_history = []
+                for msg in serializable_state["chat_history"]:
+                    serializable_chat_history.append({
+                        "type": msg.type,      # 'human', 'ai', etc.
+                        "content": msg.content # El texto del mensaje
+                    })
+                serializable_state["chat_history"] = serializable_chat_history
+
+            # 3. Hacemos lo mismo con 'relevant_docs' si contiene objetos Document.
+            if serializable_state.get("relevant_docs"):
+                serializable_docs = []
+                for doc in serializable_state["relevant_docs"]:
+                    serializable_docs.append({
+                        "page_content": doc.page_content,
+                        "metadata": doc.metadata
+                    })
+                serializable_state["relevant_docs"] = serializable_docs
+
+            # 4. Guardamos la versión 'segura' y serializable en la sesión.
+            request.session['graph_state'] = serializable_state
+            # --- FIN DEL BLOQUE DE CORRECCIÓN ---
 
         return redirect('tickets:chat')
 
+    # Pasamos el estado del grafo al contexto de la plantilla
     context = {
         'tickets_del_usuario': tickets_del_usuario,
         'ticket_activo': ticket_activo,
         'logs_conversacion': logs_conversacion,
+        # --- ¡CAMBIO CLAVE 2! ---
+        # Añadimos el graph_state al contexto para que el HTML pueda usarlo.
+        'graph_state': graph_state,
     }
     return render(request, 'tickets/chat.html', context)
 

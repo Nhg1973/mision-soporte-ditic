@@ -1,43 +1,45 @@
 # apps/dashboard/forms.py
 
 from django import forms
+from django.core.exceptions import ValidationError
 from apps.tickets.models import KnowledgeDocument
-# ¡Importamos nuestra jerarquía de temas!
-from apps.ai_core.topics import TOPIC_HIERARCHY
-
-def get_topic_choices():
-    """
-    Genera una lista de tuplas con formato para el ChoiceField de Django,
-    agrupando los subtemas bajo su tema principal.
-    """
-    choices = [('', '---------')]  # Opción vacía
-    for main_topic, sub_topics in TOPIC_HIERARCHY.items():
-        # Formato para sub-opciones agrupadas: (NombreGrupo, [(valor, etiqueta), ...])
-        formatted_sub_topics = [(f"{main_topic}/{sub_topic}", sub_topic) for sub_topic in sub_topics]
-        choices.append((main_topic, formatted_sub_topics))
-    return choices
 
 class DocumentUploadForm(forms.ModelForm):
     """
-    Formulario para subir nuevos documentos a la base de conocimiento.
-    El campo 'categoría' ahora es un menú desplegable basado en nuestra jerarquía de temas.
+    Formulario para subir nuevos documentos (versión simplificada).
+    El administrador solo necesita clasificar el documento en su nivel más alto.
+    El subtema y los tags se generarán automáticamente.
     """
-    # ¡CAMBIO CLAVE! Sobrescribimos el campo 'categoria'
-    categoria = forms.ChoiceField(
-        choices=get_topic_choices, 
-        required=True,
-        label="Tema del Documento",
-        widget=forms.Select(attrs={'class': 'form-select'})
-    )
-
     class Meta:
         model = KnowledgeDocument
-        fields = ['nombre', 'archivo', 'categoria']
+        # Mostramos solo los campos que el administrador debe rellenar manualmente
+        fields = ['nombre', 'archivo', 'tipo_documento', 'tema']
+        
         widgets = {
             'nombre': forms.TextInput(attrs={'class': 'form-control'}),
             'archivo': forms.FileInput(attrs={'class': 'form-control'}),
+            'tipo_documento': forms.Select(attrs={'class': 'form-select'}),
+            'tema': forms.Select(attrs={'class': 'form-select'}),
         }
+        
         labels = {
-            'nombre': 'Nombre del Documento',
+            'nombre': 'Nombre Descriptivo del Documento',
             'archivo': 'Seleccionar Archivo (.pdf)',
+            'tipo_documento': 'Tipo de Documento',
+            'tema': 'Tema Principal (Categoría General)',
         }
+
+    def clean_archivo(self, *args, **kwargs):
+        """
+        Valida que el archivo subido sea realmente un PDF.
+        """
+        archivo = self.cleaned_data.get('archivo', False)
+        if archivo:
+            archivo.seek(0)
+            magic_number = archivo.read(5)
+            archivo.seek(0)
+            if magic_number != b'%PDF-':
+                raise ValidationError("El archivo subido no parece ser un PDF válido.")
+        return super().clean(*args, **kwargs).get('archivo')
+
+

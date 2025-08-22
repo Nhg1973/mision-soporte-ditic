@@ -1,3 +1,4 @@
+
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -9,6 +10,7 @@ class Ticket(models.Model):
         NUEVO = 'NUEVO', 'Nuevo'
         EN_PROCESO = 'EN_PROCESO', 'En Proceso'
         ESCALADO = 'ESCALADO', 'Escalado a Técnico'
+        ESCALADO_ADMIN = 'ESCALADO_ADMIN', 'Escalado a Mesa de Entrada'
         RESUELTO_BOT = 'RESUELTO_BOT', 'Resuelto por Bot'
         RESUELTO_TECNICO = 'RESUELTO_TECNICO', 'Resuelto por Técnico'
         CERRADO = 'CERRADO', 'Cerrado'
@@ -60,13 +62,16 @@ class LogInteraccion(models.Model):
     class Emisor(models.TextChoices):
         SISTEMA = 'SISTEMA', 'Sistema'
         USUARIO = 'USUARIO', 'Usuario'
+        # ¡NUEVOS EMISORES! Para mayor claridad en el chat
+        TECNICO = 'TECNICO', 'Técnico'
+        MESA_ENTRADA = 'MESA_ENTRADA', 'Mesa de Entrada'
 
     ticket = models.ForeignKey(
         Ticket, on_delete=models.CASCADE, related_name="logs", verbose_name="Ticket Asociado"
     )
     mensaje = models.TextField(verbose_name="Contenido del Mensaje")
     emisor = models.CharField(
-        max_length=10, choices=Emisor.choices, verbose_name="Emisor"
+        max_length=15, choices=Emisor.choices, verbose_name="Emisor" # Aumentamos el max_length
     )
     fecha_creacion = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Creación")
 
@@ -101,20 +106,54 @@ class TechnicianProfile(models.Model):
         verbose_name = "Perfil de Técnico"
         verbose_name_plural = "Perfiles de Técnicos"
 
-# --- ¡NUEVO MODELO! ---
 # ==============================================================================
 # Modelo de Base de Conocimiento: KnowledgeDocument
 # ==============================================================================
+
 class KnowledgeDocument(models.Model):
     class Status(models.TextChoices):
         PENDING = 'PENDING', 'Pendiente de Procesamiento'
         PROCESSING = 'PROCESSING', 'Procesando'
         COMPLETED = 'COMPLETED', 'Procesado Exitosamente'
         FAILED = 'FAILED', 'Falló el Procesamiento'
+    
+    class DocumentType(models.TextChoices):
+        CONOCIMIENTO_GENERAL = 'CONOCIMIENTO_GENERAL', 'Conocimiento General'
+        MANUAL_TECNICO = 'MANUAL_TECNICO', 'Manual Técnico'
+        
+    class TemaChoices(models.TextChoices):
+        SOFTWARE = 'Software', 'Software'
+        HARDWARE = 'Hardware', 'Hardware'
+        ABUSO = 'Abuso del sistema', 'Abuso del sistema'
+        GENERAL = 'General', 'General'
 
     nombre = models.CharField(max_length=255, verbose_name="Nombre del Documento")
     archivo = models.FileField(upload_to='knowledge_base/', verbose_name="Archivo")
-    categoria = models.CharField(max_length=100, blank=True, null=True, verbose_name="Categoría")
+    
+    # --- ESTRUCTURA DE CLASIFICACIÓN FINAL ---
+    tipo_documento = models.CharField(
+        max_length=50,
+        choices=DocumentType.choices,
+        default=DocumentType.CONOCIMIENTO_GENERAL,
+        verbose_name="Tipo de Documento"
+    )
+    tema = models.CharField(
+        max_length=50, 
+        choices=TemaChoices.choices, 
+        default=TemaChoices.GENERAL,
+        verbose_name="Tema Principal"
+    )
+    subtema = models.CharField(
+        max_length=255, 
+        blank=True, null=True, 
+        verbose_name="Subtema o Entidad Principal (ej. Infoges, VPN)"
+    )
+    tags = models.TextField(
+        blank=True, null=True, verbose_name="Tags (separados por comas)",
+        help_text="Palabras clave relevantes, ej: acceso, contraseña, instalación"
+    )
+    
+    # --- CAMPOS DE ESTADO Y REGISTRO ---
     estado_procesamiento = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING, verbose_name="Estado de Procesamiento"
     )
@@ -134,7 +173,7 @@ class KnowledgeDocument(models.Model):
         ordering = ['-fecha_carga']
 
 # ==============================================================================
-# ¡NUEVO MODELO! - Bandeja de Salida para Telegram
+# - Bandeja de Salida para Telegram
 # ==============================================================================
 class OutgoingTelegramMessage(models.Model):
     """

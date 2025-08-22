@@ -1,9 +1,16 @@
-import os
 from celery import shared_task
 from django.conf import settings
+from apps.tickets.models import KnowledgeDocument, Ticket, TechnicianProfile, OutgoingTelegramMessage
+import os
+import json
 
-from apps.tickets.models import Ticket, TechnicianProfile, KnowledgeDocument
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_community.vectorstores import Chroma
+
 from telegram_bot.sender import send_telegram_message_sync
+
 
 # ==============================================================================
 # Tarea de Notificación al Técnico (Mejorada)
@@ -55,68 +62,79 @@ def notify_technician_task(ticket_id):
 # ==============================================================================
 # Tarea de Procesamiento de Documentos (sin cambios)
 # ==============================================================================
+
 @shared_task
 def process_document_task(document_id):
     """
-    Tarea de Celery para procesar un documento subido.
+    Tarea de Celery (versión inteligente). Extrae subtema y tags para CADA chunk
+    de manera automática, analizando su contenido específico.
     """
-    # ... (código existente sin cambios)
-    print(f"CELERY: Iniciando procesamiento para el Documento #{document_id}")
+    print(f"CELERY: Iniciando procesamiento inteligente para el Documento #{document_id}")
+    doc = None
     try:
         doc = KnowledgeDocument.objects.get(id=document_id)
         doc.estado_procesamiento = KnowledgeDocument.Status.PROCESSING
         doc.save()
 
         file_path = os.path.join(settings.MEDIA_ROOT, doc.archivo.name)
-        
-        from langchain_community.document_loaders import PyPDFLoader
         loader = PyPDFLoader(file_path)
         documents = loader.load()
-
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = text_splitter.split_documents(documents)
         
-        print(f"CELERY: Enriqueciendo {len(chunks)} fragmentos con metadatos de tema...")
+        print(f"CELERY: Analizando {len(chunks)} fragmentos para extraer metadatos dinámicamente...")
+        gemini_api_key = os.getenv('GEMINI_API_KEY')
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.0, google_api_key=gemini_api_key, model_kwargs={"response_mime_type": "application/json"})
+        
+        enriched_chunks = []
+        all_tags = set()
+        all_subtopics = set()
+
         for i, chunk in enumerate(chunks):
-            # Metadatos existentes
+            # --- ANÁLISIS AUTOMÁTICO POR CHUNK ---
+            analysis_prompt = (
+                f"Analiza el siguiente fragmento de texto de un documento cuyo tema principal es '{doc.tema}'.\n"
+                "1. **subtema:** Genera un título o encabezado muy conciso que describa este fragmento específico (ej: 'Acceso con Contraseña', 'Configuración de VPN', 'Instalación de Impresora').\n"
+                "2. **tags:** Extrae una lista de 2 a 4 palabras clave o entidades relevantes del fragmento (ej: ['login', 'password', 'acceso']).\n\n"
+                "**IMPORTANTE:** Tu respuesta debe ser únicamente un objeto JSON con las claves 'subtema' y 'tags'.\n\n"
+                f"Fragmento de Texto:\n---\n{chunk.page_content}\n---\n\nJSON:"
+            )
+            
+            response = llm.invoke(analysis_prompt)
+            result = json.loads(response.content)
+            
+            subtema = result.get('subtema', 'General')
+            tags = result.get('tags', [])
+            
+            # Añadimos los metadatos completos al chunk
             chunk.metadata['document_id'] = str(doc.id)
             chunk.metadata['document_name'] = doc.nombre
-            chunk.metadata['chunk_index'] = i
+            chunk.metadata['document_type'] = doc.tipo_documento
+            chunk.metadata['tema'] = doc.tema # El tema general del documento
+            chunk.metadata['subtema'] = subtema # El subtema específico de ESTE chunk
+            chunk.metadata['tags'] = ", ".join(tags) # Guardamos los tags como un string
+            chunk.metadata['source'] = doc.archivo.name
+            chunk.metadata['page'] = chunk.metadata.get('page', 0) + 1
+            enriched_chunks.append(chunk)
+
+            # Guardamos los tags y subtemas para el registro principal del documento (como un resumen)
+            all_tags.update(tags)
+            all_subtopics.add(subtema)
             
-            # ¡NUEVOS METADATOS DE TEMA!
-            # Usamos la categoría guardada desde el formulario.
-            if doc.categoria:
-                # Si la categoría es "TemaPrincipal/SubTema", los separamos.
-                parts = doc.categoria.split('/')
-                chunk.metadata['tema'] = parts[0]
-                if len(parts) > 1:
-                    chunk.metadata['subtema'] = parts[1]
-                else:
-                    chunk.metadata['subtema'] = 'General' # Un subtema por defecto
+            print(f"-> Chunk {i+1}/{len(chunks)} analizado. Subtema: '{subtema}'")
 
-        # Imprimimos un ejemplo para verificar
-        if chunks:
-          print(f"CELERY: Ejemplo de metadatos del primer chunk: {chunks[0].metadata}")
-      
+        # Actualizamos el documento principal con un resumen de todos los tags y subtemas encontrados
+        doc.subtema = ", ".join(sorted(list(all_subtopics)))
+        doc.tags = ", ".join(sorted(list(all_tags)))
+        doc.save()
 
-        print(f"CELERY: Documento #{doc.id} dividido en {len(chunks)} fragmentos.")
-
-        gemini_api_key = os.getenv('GEMINI_API_KEY')
-        if not gemini_api_key:
-            raise ValueError("La clave de API de Gemini no está configurada en el archivo .env")
-
-        from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=gemini_api_key)
+        if enriched_chunks:
+            print(f"CELERY: Ejemplo de metadatos del primer chunk: {enriched_chunks[0].metadata}")
         
-        from langchain_community.vectorstores import Chroma
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=gemini_api_key)
         persist_directory = os.path.join(settings.BASE_DIR, 'chroma_db')
         
-        vectorstore = Chroma.from_documents(
-            documents=chunks,
-            embedding=embeddings,
-            persist_directory=persist_directory
-        )
+        Chroma.from_documents(documents=enriched_chunks, embedding=embeddings, persist_directory=persist_directory)
         
         print(f"CELERY: Embeddings creados y guardados en ChromaDB para el Documento #{doc.id}")
 
