@@ -123,23 +123,36 @@
                     <div class="card-body">
                         <!-- Formulario de subida -->
                         <h5>Subir Nuevo Documento</h5>
-                        <form method="post" enctype="multipart/form-data">
-                            {% csrf_token %}
-                            <div class="mb-3">
-                                <label for="{{ upload_form.nombre.id_for_label }}" class="form-label">{{ upload_form.nombre.label }}</label>
-                                {{ upload_form.nombre }}
-                            </div>
-                            <div class="mb-3">
-                                <label for="{{ upload_form.categoria.id_for_label }}" class="form-label">{{ upload_form.categoria.label }}</label>
-                                {{ upload_form.categoria }}
-                            </div>
-                            <div class="mb-3">
-                                <label for="{{ upload_form.archivo.id_for_label }}" class="form-label">{{ upload_form.archivo.label }}</label>
-                                {{ upload_form.archivo }}
-                            </div>
-                            <button type="submit" class="btn btn-primary w-100">Subir y Procesar</button>
-                        </form>
+                            <form method="post" enctype="multipart/form-data">
+                                {% csrf_token %}
+                                
+                                <div class="mb-3">
+                                    <label for="{{ upload_form.nombre.id_for_label }}" class="form-label">{{ upload_form.nombre.label }}</label>
+                                    {{ upload_form.nombre }}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ upload_form.tipo_documento.id_for_label }}" class="form-label">{{ upload_form.tipo_documento.label }}</label>
+                                    {{ upload_form.tipo_documento }}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ upload_form.tema.id_for_label }}" class="form-label">{{ upload_form.tema.label }}</label>
+                                    {{ upload_form.tema }}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ upload_form.subtema.id_for_label }}" class="form-label">{{ upload_form.subtema.label }}</label>
+                                    {{ upload_form.subtema }}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ upload_form.tags.id_for_label }}" class="form-label">{{ upload_form.tags.label }}</label>
+                                    {{ upload_form.tags }}
+                                </div>
+                                <div class="mb-3">
+                                    <label for="{{ upload_form.archivo.id_for_label }}" class="form-label">{{ upload_form.archivo.label }}</label>
+                                    {{ upload_form.archivo }}
+                                </div>
 
+                                <button type="submit" class="btn btn-primary w-100">Subir y Procesar</button>
+                            </form>
                         <hr>
 
                         <!-- Documentos existentes -->

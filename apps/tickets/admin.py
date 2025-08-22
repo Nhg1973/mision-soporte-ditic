@@ -70,16 +70,32 @@ admin.site.register(User, UserAdmin)
 # ==============================================================================
 @admin.register(KnowledgeDocument)
 class KnowledgeDocumentAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'categoria', 'estado_procesamiento', 'cargado_por', 'fecha_carga')
-    list_filter = ('estado_procesamiento', 'categoria', 'fecha_carga')
-    search_fields = ('nombre', 'archivo')
-    readonly_fields = ('estado_procesamiento', 'cargado_por', 'fecha_carga', 'ultimo_error')
-
-    def save_model(self, request, obj, form, change):
-        # Asigna automáticamente el usuario que está subiendo el archivo.
-        if not obj.pk: # Solo al crear el objeto
-            obj.cargado_por = request.user
-        super().save_model(request, obj, form, change)
+    """
+    Configuración del panel de administración para los documentos de conocimiento.
+    Actualizado para usar los nuevos campos de clasificación.
+    """
+    # Usamos los nuevos campos en lugar del antiguo 'categoria'
+    list_display = (
+        'nombre', 
+        'tema', 
+        'subtema', 
+        'tipo_documento', 
+        'estado_procesamiento', 
+        'fecha_carga'
+    )
+    # Los filtros ahora son más potentes
+    list_filter = (
+        'estado_procesamiento', 
+        'tipo_documento', 
+        'tema'
+    )
+    # Habilitamos la búsqueda en los nuevos campos y tags
+    search_fields = (
+        'nombre', 
+        'subtema', 
+        'tags'
+    )
+    readonly_fields = ('fecha_carga',)
 
 
 

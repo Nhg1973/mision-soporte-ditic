@@ -1,27 +1,10 @@
+# Este archivo es generado automáticamente por el comando 'update_topics'.
+# No lo edites manualmente.
+
 TOPIC_HIERARCHY = {
-    "Identidad Visual Web": [
-        "[cite_start]Diseño General y Estructura",       
-        "[cite_start]Página de Inicio",                   
-        "[cite_start]Contenidos Más Consultados",         
-        "[cite_start]Panel de Noticias",                  
-        "[cite_start]Panel de Iniciativas",               
-        "[cite_start]Bloque de Contacto y Mapa",          
+    "Software": [
+        "General",
     ],
-    "Secciones de Contenido": [
-        "[cite_start]Sección Asistencia Consular",        
-        "[cite_start]Sección Noticias",                   
-        "[cite_start]Sección Contacto",                   
-    ],
-    "Trámites y Documentación": [
-        "[cite_start]Apostilla de la Haya",               
-        "[cite_start]DNI para Residentes",                
-        "[cite_start]Pasaporte de Emergencia",            
-        "[cite_start]Certificado de Antecedentes Penales",
-        "[cite_start]Opción de Nacionalidad Argentina",   
-    ],
-    "Información General": [
-        "[cite_start]Datos de Representaciones",          
-        "[cite_start]Contacto y Redes Sociales",              ]
 }
 
 def get_master_topic_list():
